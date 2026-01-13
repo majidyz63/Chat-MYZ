@@ -1123,11 +1123,89 @@ class ApiService {
   }
 }
 
+// TTS Service
+class TTSService {
+  constructor() {
+    this.synth = window.speechSynthesis;
+    this.supportedVoices = {
+      'fa-IR': null,  // Persian
+      'nl-BE': null   // Dutch (Belgium)
+    };
+    this.initializeVoices();
+  }
+
+  initializeVoices() {
+    const loadVoices = () => {
+      const voices = this.synth.getVoices();
+      
+      // Find Persian voice (fa-IR)
+      this.supportedVoices['fa-IR'] = voices.find(voice => 
+        voice.lang === 'fa-IR' || voice.lang === 'fa'
+      ) || null;
+      
+      // Find Dutch Belgium voice (nl-BE)
+      this.supportedVoices['nl-BE'] = voices.find(voice => 
+        voice.lang === 'nl-BE'
+      ) || null;
+    };
+
+    loadVoices();
+    
+    // Voices might load asynchronously
+    if (this.synth.onvoiceschanged !== undefined) {
+      this.synth.onvoiceschanged = loadVoices;
+    }
+  }
+
+  detectLanguage(text) {
+    // Simple language detection based on character patterns
+    const persianPattern = /[\u0600-\u06FF]/;
+    const dutchPattern = /\b(de|het|een|van|in|op|met|voor|door|naar|uit|over|onder|tussen|bij|aan|om|als|dat|dit|zijn|hebben|worden|kunnen|zullen|moeten|mogen|willen)\b/i;
+    
+    if (persianPattern.test(text)) {
+      return 'fa-IR';
+    } else if (dutchPattern.test(text)) {
+      return 'nl-BE';
+    }
+    
+    // Default fallback - try Persian first, then Dutch
+    return this.supportedVoices['fa-IR'] ? 'fa-IR' : 'nl-BE';
+  }
+
+  speak(text) {
+    if (!text || !this.synth) return;
+    
+    // Stop any ongoing speech
+    this.synth.cancel();
+    
+    const detectedLang = this.detectLanguage(text);
+    const voice = this.supportedVoices[detectedLang];
+    
+    // Fail silently if voice not available
+    if (!voice) return;
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.voice = voice;
+    utterance.rate = 0.9;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    
+    this.synth.speak(utterance);
+  }
+
+  stop() {
+    if (this.synth) {
+      this.synth.cancel();
+    }
+  }
+}
+
 // Main Chat App
 class ChatApp {
   constructor() {
     this.apiService = new ApiService();
     this.storageService = new StorageService();
+    this.ttsService = new TTSService();
     this.isStreaming = false;
     this.currentStreamingMessage = null;
     this.selectedFile = null;
@@ -1511,6 +1589,9 @@ class ChatApp {
       // Save the completed message only once at the end
       if (this.currentStreamingMessage.content) {
         this.storageService.addMessage('assistant', this.currentStreamingMessage.content);
+        
+        // Auto-play TTS after AI finishes responding
+        this.ttsService.speak(this.currentStreamingMessage.content);
       }
     } catch (error) {
       console.error('Streaming error:', error);
